@@ -1,0 +1,515 @@
+model User {
+  // Synced by Adaptive when present
+  id                  String               @id
+  name                String?
+  handle              String?
+  image               String?
+  // App-managed fields
+  email               String?
+  fullName            String?
+  company             String?
+  department          String?
+  jobTitle            String?
+  // Short numeric identifier to show in UI (1..9999)
+  shortId             Int?                 @unique
+  isAdmin             Boolean              @default(false)
+  // Access control
+  isBlocked           Boolean              @default(false)
+  accessFrom          DateTime?
+  accessTo            DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  // Relations
+  authoredViolations  Violation[]          @relation("authorViolations")
+  responsibleFor      Violation[]          @relation("responsibleViolations")
+  StorageFile         StorageFile[]
+  PayOrder            PayOrder[]
+  Visit               Visit[]
+  KbtMeeting          KbtMeeting[]
+  ProfileSetupImport  ProfileSetupImport[]
+  Accident            Accident[]
+  AssignmentsTable    AssignmentsTable?
+  PcReportTable       PcReportTable?
+  adminPermissions    AdminPermission[]
+  MedicineReportTable MedicineReportTable?
+
+  @@index([email])
+  @@index([createdAt])
+  @@index([isBlocked])
+  @@index([accessFrom])
+  @@index([accessTo])
+}
+
+/// Counter to ensure shortId numbers are never reused, even after deletions
+
+model AdminPermission {
+  id        String   @id @default(cuid())
+  userId    String
+  key       String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([userId])
+  @@index([key])
+}
+
+model ShortIdCounter {
+  id          String   @id @default(cuid())
+  nextShortId Int      @default(1)
+  updatedAt   DateTime @updatedAt
+}
+
+model AppSettings {
+  id                   String    @id @default(cuid())
+  userLimit            Int       @default(200000)
+  // Storage quota in MB (to avoid integer overflow); default 512 GB
+  storageQuotaMb       Int       @default(524288)
+  // Cached illustration for Auth screen (mobile)
+  loginIllustrationUrl String?
+  // Global maintenance mode ("проверка") flag
+  maintenanceMode      Boolean   @default(false)
+  maintenanceSince     DateTime?
+  maintenanceByUserId  String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}
+
+model Violation {
+  id                   String                @id @default(cuid())
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  // Author (who created)
+  authorId             String
+  author               User                  @relation("authorViolations", fields: [authorId], references: [id])
+  date                 DateTime
+  shop                 String
+  section              String
+  objectInspected      String
+  description          String
+  photoUrl             String?
+  auditor              String
+  category             String
+  conditionType        String
+  hazardFactor         String?
+  note                 String?
+  actions              String?
+  // Responsible person (optional)
+  responsibleUserId    String?
+  responsibleUser      User?                 @relation("responsibleViolations", fields: [responsibleUserId], references: [id])
+  responsibleName      String?
+  dueDate              DateTime?
+  status               String                @default("Новый")
+  // Author confirmation
+  authorConfirmed      Boolean               @default(false)
+  authorConfirmedAt    DateTime?
+  // Document code like "ПАБ-01-25"
+  code                 String?               @unique
+  PrescriptionRegister PrescriptionRegister?
+
+  @@index([authorId])
+  @@index([date])
+  @@index([category])
+  @@index([conditionType])
+  @@index([hazardFactor])
+  @@index([responsibleUserId])
+  @@index([shop])
+  @@index([section])
+  @@index([objectInspected])
+  @@index([auditor])
+  @@index([responsibleName])
+  @@index([status])
+  @@index([shop, section])
+  @@index([authorId, date])
+  @@index([responsibleUserId, dueDate])
+}
+
+// Sequence table for annual numbering of violations
+
+model ViolationSeq {
+  id         String @id @default(cuid())
+  year       Int
+  nextNumber Int    @default(1)
+
+  @@unique([year])
+}
+
+model StorageFolder {
+  id        String          @id @default(cuid())
+  name      String
+  parentId  String?
+  parent    StorageFolder?  @relation("FolderToParent", fields: [parentId], references: [id])
+  children  StorageFolder[] @relation("FolderToParent")
+  files     StorageFile[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([parentId])
+}
+
+model StorageFile {
+  id                 String               @id @default(cuid())
+  name               String
+  url                String
+  sizeBytes          Int                  @default(0)
+  mimeType           String?
+  folderId           String?
+  folder             StorageFolder?       @relation(fields: [folderId], references: [id])
+  uploadedBy         String
+  user               User                 @relation(fields: [uploadedBy], references: [id])
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  ProfileSetupImport ProfileSetupImport[]
+
+  @@index([folderId])
+  @@index([uploadedBy])
+  @@index([name, createdAt])
+}
+
+// Monetization via Tinkoff
+
+model PayProduct {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  priceRub    Int // price in RUB (whole rubles)
+  kind        String     @default("IN_APP_PURCHASE")
+  enabled     Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  orders      PayOrder[]
+
+  @@index([enabled])
+}
+
+model PayOrder {
+  id         String     @id @default(cuid())
+  productId  String
+  userId     String
+  amountRub  Int
+  provider   String     @default("TINKOFF")
+  orderKey   String
+  paymentId  String?
+  paymentUrl String?
+  status     String     @default("NEW")
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  product    PayProduct @relation(fields: [productId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([productId])
+  @@index([status])
+  @@index([orderKey])
+}
+
+model Visit {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  path      String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+model Accident {
+  id          String   @id @default(cuid())
+  date        DateTime
+  title       String?
+  description String?
+  department  String?
+  severity    String?
+  status      String?  @default("OPEN")
+  createdBy   String
+  user        User     @relation(fields: [createdBy], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
+  @@index([createdBy])
+  @@index([department])
+  @@index([severity])
+  @@index([status])
+}
+
+model VisitSessionOverride {
+  id              String    @id @default(cuid())
+  userId          String
+  originalStartAt DateTime
+  originalEndAt   DateTime
+  startAt         DateTime?
+  endAt           DateTime?
+  durationSec     Int?
+  visits          Int?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([userId, originalStartAt, originalEndAt])
+  @@index([userId, originalStartAt, originalEndAt])
+}
+
+model PrescriptionRegister {
+  id          String    @id @default(cuid())
+  violationId String    @unique
+  violation   Violation @relation(fields: [violationId], references: [id])
+  docUrl      String?
+  createdAt   DateTime  @default(now())
+
+  @@index([createdAt])
+}
+
+// Customizable Home screen buttons
+
+model HomeButton {
+  id         String   @id @default(cuid())
+  title      String
+  targetType String   @default("PAGE") // PAGE or ROUTE
+  targetSlug String?
+  targetPath String?
+  order      Int      @default(0)
+  isLocked   Boolean  @default(false)
+  isHidden   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([isHidden])
+  @@index([order])
+}
+
+// Simple pages that can be linked from Home buttons
+
+model SimplePage {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// HTML-страницы входа для клиентов (по коду организации)
+
+model ClientLoginPage {
+  id        String   @id @default(cuid())
+  orgCode   String   @unique
+  name      String?
+  html      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgCode])
+}
+
+// Базовая карточка клиента/организации
+
+model Client {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  email     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([code])
+}
+
+// Плановые собрания КБТ (админ)
+
+model KbtMeeting {
+  id        String   @id @default(cuid())
+  title     String
+  date      DateTime
+  type      String   @default("PLAN") // PLAN | INCIDENT
+  createdBy String
+  user      User     @relation(fields: [createdBy], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// Отчет для УД: заголовок и строки
+
+model UdReport {
+  id        String        @id @default(cuid())
+  title     String        @default("Отчет для УД")
+  columnA   String
+  columnB   String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  rows      UdReportRow[]
+}
+
+model UdReportRow {
+  id        String   @id @default(cuid())
+  reportId  String
+  report    UdReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  label     String
+  valueA    String?
+  valueB    String?
+  order     Int      @default(0)
+  section   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([reportId])
+  @@index([order])
+}
+
+// Таблица с данными "ТАБЛИЦА УЧЕТА ПОРУЧЕНИЙ" (храним строки в сериализованном виде)
+
+model AssignmentsTable {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  rowsJson  String // JSON.stringify(string[][])
+  locked    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+// Таблица «Для отчета по ПК» (персональное сохранение строк в JSON)
+
+model PcReportTable {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  rowsJson  String // JSON.stringify(string[][])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+// Таблица «Медицина» (персональное сохранение строк в JSON)
+
+model MedicineReportTable {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  rowsJson  String // JSON.stringify(string[][])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+// Уведомления о просроченных предписаниях (чтобы не дублировать письма)
+
+model OverdueNotice {
+  id          String   @id @default(cuid())
+  violationId String   @unique
+  toUserId    String
+  sentAt      DateTime @default(now())
+
+  @@index([toUserId])
+  @@index([sentAt])
+}
+
+// Напоминания «до срока 2 дня» (чтобы не слать дубликаты)
+
+model DueSoonNotice {
+  id          String   @id @default(cuid())
+  violationId String   @unique
+  toUserId    String
+  sentAt      DateTime @default(now())
+
+  @@index([toUserId])
+  @@index([sentAt])
+}
+
+// Учет вводных инструктажей (по датам)
+
+model IntroBriefing {
+  id        String   @id @default(cuid())
+  date      DateTime
+  count     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date])
+  @@index([date])
+}
+
+// Шаблон Производственного Контроля (DOCX -> HTML)
+
+model ProdControlTemplate {
+  id           String             @id @default(cuid())
+  name         String
+  fileUrl      String
+  html         String
+  placeholders String? // JSON: array of placeholder keys like {{key}}
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  entries      ProdControlEntry[]
+}
+
+model ProdControlEntry {
+  id         String              @id @default(cuid())
+  templateId String
+  template   ProdControlTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  userId     String?
+  valuesJson String // JSON: Record<string,string>
+  createdAt  DateTime            @default(now())
+
+  @@index([templateId])
+  @@index([userId])
+}
+
+model ProfileSetupImport {
+  id              String       @id @default(cuid())
+  userId          String
+  user            User         @relation(fields: [userId], references: [id])
+  fileId          String?
+  file            StorageFile? @relation(fields: [fileId], references: [id])
+  departmentsJson String
+  itemsJson       String
+  createdAt       DateTime     @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/// Гостевые демо-ссылки для входа без регистрации
+
+model GuestDemoLink {
+  id         String    @id @default(cuid())
+  token      String    @unique
+  createdBy  String?
+  expiresAt  DateTime?
+  maxUses    Int?
+  usedCount  Int       @default(0)
+  isDisabled Boolean   @default(false)
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([expiresAt])
+  @@index([isDisabled])
+}
+
+model WebinarVideo {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  videoUrl    String
+  isExternal  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  createdBy   String?
+
+  @@index([createdAt])
+}
+
+model PabCatalogItem {
+  id        String   @id @default(cuid())
+  kind      String
+  value     String
+  createdAt DateTime @default(now())
+
+  @@unique([kind, value])
+}
